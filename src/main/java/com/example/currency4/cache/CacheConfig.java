@@ -1,4 +1,4 @@
-package com.example.currency4.config;
+package com.example.currency4.cache;
 
 import com.example.currency4.entity.ConversionHistory;
 import org.springframework.context.annotation.Bean;

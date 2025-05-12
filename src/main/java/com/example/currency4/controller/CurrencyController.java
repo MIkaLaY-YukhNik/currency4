@@ -1,95 +1,89 @@
 package com.example.currency4.controller;
 
+import com.example.currency4.cache.CacheConfig;
+import com.example.currency4.dto.ConvertRequest;
 import com.example.currency4.entity.ConversionHistory;
+import com.example.currency4.entity.CurrencyRate;
+import com.example.currency4.entity.User;
 import com.example.currency4.model.CurrencyResponse;
 import com.example.currency4.repository.ConversionHistoryRepository;
+import com.example.currency4.repository.CurrencyRateRepository;
+import com.example.currency4.repository.UserRepository;
 import com.example.currency4.service.CurrencyService;
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
-import io.swagger.v3.oas.annotations.responses.ApiResponse;
-import io.swagger.v3.oas.annotations.responses.ApiResponses;
-import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeParseException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @RestController
-@Tag(name = "Currency Converter", description = "API for currency conversion and history")
+@RequestMapping("/api")
 public class CurrencyController {
 
     private final CurrencyService currencyService;
     private final ConversionHistoryRepository conversionHistoryRepository;
+    private final CurrencyRateRepository currencyRateRepository;
+    private final UserRepository userRepository;
     private final Map<String, List<ConversionHistory>> cache;
 
-    public CurrencyController(CurrencyService currencyService, ConversionHistoryRepository conversionHistoryRepository, Map<String, List<ConversionHistory>> cache) {
+    public CurrencyController(CurrencyService currencyService, ConversionHistoryRepository conversionHistoryRepository,
+                              CurrencyRateRepository currencyRateRepository, UserRepository userRepository,
+                              Map<String, List<ConversionHistory>> cache) {
         this.currencyService = currencyService;
         this.conversionHistoryRepository = conversionHistoryRepository;
+        this.currencyRateRepository = currencyRateRepository;
+        this.userRepository = userRepository;
         this.cache = cache;
     }
 
-    @GetMapping("/convert")
-    @Operation(summary = "Convert currency", description = "Converts an amount from one currency to another")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Conversion successful"),
-            @ApiResponse(responseCode = "400", description = "Invalid input parameters"),
-            @ApiResponse(responseCode = "500", description = "Internal server error")
-    })
-    public ResponseEntity<Map<String, Object>> convert(
-            @Parameter(description = "Source currency code") @RequestParam String from,
-            @Parameter(description = "Target currency code") @RequestParam String to,
-            @Parameter(description = "Amount to convert") @RequestParam double amount) {
-        if (from == null || from.trim().isEmpty()) {
-            throw new IllegalArgumentException("From currency must not be blank");
-        }
-        if (to == null || to.trim().isEmpty()) {
-            throw new IllegalArgumentException("To currency must not be blank");
-        }
-        if (amount <= 0) {
-            throw new IllegalArgumentException("Amount must be positive");
-        }
+    @PostMapping("/convert")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> convert(@Valid @RequestBody ConvertRequest request) {
+        CurrencyResponse rates = currencyService.fetchExchangeRates();
+        double convertedAmount = currencyService.convertAmount(request.getFrom(), request.getTo(), request.getAmount(), rates);
 
-        try {
-            CurrencyResponse rates = currencyService.fetchExchangeRates();
-            double convertedAmount = currencyService.convertAmount(from, to, amount, rates);
+        User user = userRepository.findById(1L).orElseThrow(() -> new IllegalArgumentException("User not found"));
 
-            ConversionHistory conversionHistory = new ConversionHistory(
-                    from.toUpperCase(),
-                    to.toUpperCase(),
-                    amount,
-                    convertedAmount
-            );
-            conversionHistoryRepository.save(conversionHistory);
+        ConversionHistory conversionHistory = new ConversionHistory(
+                request.getFrom().toUpperCase(),
+                request.getTo().toUpperCase(),
+                request.getAmount(),
+                convertedAmount,
+                user
+        );
+        conversionHistory.setNotes("Automated conversion");
+        conversionHistory.setStatus("COMPLETED");
 
-            Map<String, Object> result = new HashMap<>();
-            result.put("fromCurrency", from.toUpperCase());
-            result.put("toCurrency", to.toUpperCase());
-            result.put("convertedAmount", convertedAmount);
+        Optional<CurrencyRate> fromCurrencyRate = currencyRateRepository.findById(request.getFrom().toUpperCase());
+        Optional<CurrencyRate> toCurrencyRate = currencyRateRepository.findById(request.getTo().toUpperCase());
 
-            return ResponseEntity.ok(result);
-        } catch (Exception e) {
-            throw new RuntimeException("Unable to process conversion: " + e.getMessage(), e);
-        }
+        fromCurrencyRate.ifPresent(conversionHistory.getCurrencyRates()::add);
+        toCurrencyRate.ifPresent(conversionHistory.getCurrencyRates()::add);
+
+        conversionHistoryRepository.save(conversionHistory);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("fromCurrency", request.getFrom().toUpperCase());
+        result.put("toCurrency", request.getTo().toUpperCase());
+        result.put("convertedAmount", convertedAmount);
+
+        return ResponseEntity.ok(result);
     }
 
     @GetMapping("/history")
-    @Operation(summary = "Get conversion history by source currency", description = "Returns conversion history for a given source currency")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "History retrieved successfully"),
-            @ApiResponse(responseCode = "400", description = "Invalid currency"),
-            @ApiResponse(responseCode = "500", description = "Internal server error")
-    })
     public ResponseEntity<List<ConversionHistory>> getConversionHistoryByCurrency(
-            @Parameter(description = "Source currency code") @RequestParam String currency) {
-        if (currency == null || currency.trim().isEmpty()) {
-            throw new IllegalArgumentException("Currency must not be empty");
-        }
-
+            @RequestParam String currency) {
         String cacheKey = currency.toUpperCase();
         if (cache.containsKey(cacheKey)) {
             return ResponseEntity.ok(cache.get(cacheKey));
@@ -102,18 +96,8 @@ public class CurrencyController {
     }
 
     @GetMapping("/to-history")
-    @Operation(summary = "Get conversion history by target currency", description = "Returns conversion history for a given target currency")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "History retrieved successfully"),
-            @ApiResponse(responseCode = "400", description = "Invalid currency"),
-            @ApiResponse(responseCode = "500", description = "Internal server error")
-    })
     public ResponseEntity<List<ConversionHistory>> getConversionToHistoryByCurrency(
-            @Parameter(description = "Target currency code") @RequestParam String currency) {
-        if (currency == null || currency.trim().isEmpty()) {
-            throw new IllegalArgumentException("Currency must not be empty");
-        }
-
+            @RequestParam String currency) {
         String cacheKey = currency.toUpperCase();
         if (cache.containsKey(cacheKey)) {
             return ResponseEntity.ok(cache.get(cacheKey));
@@ -126,33 +110,50 @@ public class CurrencyController {
     }
 
     @GetMapping("/history-by-date")
-    @Operation(summary = "Get conversion history by date", description = "Returns conversion history for a given date")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "History retrieved successfully"),
-            @ApiResponse(responseCode = "400", description = "Invalid date format"),
-            @ApiResponse(responseCode = "500", description = "Internal server error")
-    })
     public ResponseEntity<List<ConversionHistory>> getConversionHistoryByDate(
-            @Parameter(description = "Date in ISO format (e.g., 2023-10-01T10:00:00)") @RequestParam String date) {
-        if (date == null || date.trim().isEmpty()) {
-            throw new IllegalArgumentException("Date must not be empty");
-        }
-
-        LocalDateTime parsedDate;
+            @RequestParam String date) {
         try {
-            parsedDate = LocalDateTime.parse(date);
-        } catch (Exception e) {
-            throw new IllegalArgumentException("Invalid date format. Use ISO format (e.g., 2023-10-01T10:00:00)", e);
+            LocalDateTime parsedDate = LocalDateTime.parse(date); // Ожидает формат "2025-05-11T10:00:00"
+            String cacheKey = "date_" + parsedDate.toString();
+            if (cache.containsKey(cacheKey)) {
+                return ResponseEntity.ok(cache.get(cacheKey));
+            }
+
+            List<ConversionHistory> history = conversionHistoryRepository.findByDate(parsedDate);
+            cache.put(cacheKey, history);
+
+            return ResponseEntity.ok(history);
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException("Invalid date format. Use ISO format (e.g., 2025-05-11T10:00:00)", e);
         }
+    }
 
-        String cacheKey = "date_" + parsedDate.toString();
-        if (cache.containsKey(cacheKey)) {
-            return ResponseEntity.ok(cache.get(cacheKey));
-        }
+    @GetMapping("/history/{id}")
+    public ResponseEntity<ConversionHistory> getConversionHistoryById(@PathVariable Long id) {
+        Optional<ConversionHistory> history = conversionHistoryRepository.findById(id);
+        return history.map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).build());
+    }
 
-        List<ConversionHistory> history = conversionHistoryRepository.findByDate(parsedDate);
-        cache.put(cacheKey, history);
-
+    @GetMapping("/history/user/{userId}")
+    public ResponseEntity<List<ConversionHistory>> getConversionHistoryByUserId(@PathVariable Long userId) {
+        List<ConversionHistory> history = conversionHistoryRepository.findByUserIdNative(userId);
         return ResponseEntity.ok(history);
+    }
+
+    @GetMapping("/history/sorted")
+    public ResponseEntity<List<ConversionHistory>> getSortedConversionHistory() {
+        List<ConversionHistory> history = conversionHistoryRepository.findAll();
+        Collections.sort(history, (h1, h2) -> h1.getConvertedAt().compareTo(h2.getConvertedAt()));
+        return ResponseEntity.ok(history);
+    }
+
+    @GetMapping("/history/paged")
+    public ResponseEntity<Page<ConversionHistory>> getPagedConversionHistory(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        Pageable pageable = PageRequest.of(page, size);
+        Page<ConversionHistory> historyPage = conversionHistoryRepository.findAll(pageable);
+        return ResponseEntity.ok(historyPage);
     }
 }

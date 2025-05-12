@@ -1,10 +1,13 @@
 package com.example.currency4.entity;
 
 import jakarta.persistence.*;
-
 import java.time.LocalDateTime;
+import java.util.HashSet;
+import java.util.Objects;
+import java.util.Set;
 
 @Entity
+@Table(name = "conversion_history")
 public class ConversionHistory {
 
     @Id
@@ -16,19 +19,39 @@ public class ConversionHistory {
     private double amount;
     private double convertedAmount;
 
-    @Column(name = "converted_at")
+    @Column(name = "converted_at", nullable = false)
     private LocalDateTime convertedAt;
+
+    @Column(name = "notes", length = 255)
+    private String notes;
+
+    @Column(name = "status", length = 50)
+    private String status;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
+    private User user;
+
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(
+            name = "conversion_history_currency_rate",
+            joinColumns = @JoinColumn(name = "conversion_history_id"),
+            inverseJoinColumns = @JoinColumn(name = "currency_rate_code")
+    )
+    private Set<CurrencyRate> currencyRates = new HashSet<>();
 
     public ConversionHistory() {
         this.convertedAt = LocalDateTime.now();
     }
 
-    public ConversionHistory(String fromCurrency, String toCurrency, double amount, double convertedAmount) {
+    public ConversionHistory(String fromCurrency, String toCurrency, double amount, double convertedAmount, User user) {
         this.fromCurrency = fromCurrency;
         this.toCurrency = toCurrency;
         this.amount = amount;
         this.convertedAmount = convertedAmount;
         this.convertedAt = LocalDateTime.now();
+        this.status = "COMPLETED";
+        this.user = user;
     }
 
     public Long getId() {
@@ -77,5 +100,50 @@ public class ConversionHistory {
 
     public void setConvertedAt(LocalDateTime convertedAt) {
         this.convertedAt = convertedAt;
+    }
+
+    public String getNotes() {
+        return notes;
+    }
+
+    public void setNotes(String notes) {
+        this.notes = notes;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
+    }
+
+    public User getUser() {
+        return user;
+    }
+
+    public void setUser(User user) {
+        this.user = user;
+    }
+
+    public Set<CurrencyRate> getCurrencyRates() {
+        return currencyRates;
+    }
+
+    public void setCurrencyRates(Set<CurrencyRate> currencyRates) {
+        this.currencyRates = currencyRates;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        ConversionHistory that = (ConversionHistory) o;
+        return Objects.equals(id, that.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id);
     }
 }
