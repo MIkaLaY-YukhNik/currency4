@@ -1,5 +1,9 @@
 package com.example.currency4.entity;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonIdentityInfo;
+import com.fasterxml.jackson.annotation.JsonManagedReference;
+import com.fasterxml.jackson.annotation.ObjectIdGenerators;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 import java.util.HashSet;
@@ -8,6 +12,7 @@ import java.util.Set;
 
 @Entity
 @Table(name = "conversion_history")
+@JsonIdentityInfo(generator = ObjectIdGenerators.PropertyGenerator.class, property = "id")
 public class ConversionHistory {
 
     @Id
@@ -30,6 +35,7 @@ public class ConversionHistory {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
+    @JsonBackReference
     private User user;
 
     @ManyToMany(fetch = FetchType.LAZY)
@@ -38,6 +44,7 @@ public class ConversionHistory {
             joinColumns = @JoinColumn(name = "conversion_history_id"),
             inverseJoinColumns = @JoinColumn(name = "currency_rate_code")
     )
+    @JsonManagedReference
     private Set<CurrencyRate> currencyRates = new HashSet<>();
 
     public ConversionHistory() {

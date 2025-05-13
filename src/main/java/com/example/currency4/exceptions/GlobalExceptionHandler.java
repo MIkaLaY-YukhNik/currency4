@@ -1,4 +1,4 @@
-package com.example.currency4;
+package com.example.currency4.exceptions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
