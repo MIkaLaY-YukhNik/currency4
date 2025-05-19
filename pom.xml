@@ -90,8 +90,7 @@
 				</executions>
 
 				<configuration>
-					<configLocation>checkstyle-config.xml</configLocation>
-
+					<configLocation>checkstyle.xml</configLocation>
 					<consoleOutput>true</consoleOutput>
 					<failsOnError>true</failsOnError>
 					<includeTestSourceDirectory>true</includeTestSourceDirectory>
